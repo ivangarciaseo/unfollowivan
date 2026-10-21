@@ -2,7 +2,7 @@ name: Protect public/index.html
 
 on:
   pull_request:
-    branches: [master]
+    branches: [main]
 
 jobs:
   block-index-html:
