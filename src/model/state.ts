@@ -17,6 +17,10 @@ type ScanningState = {
   readonly scanIncomplete?: boolean;
   readonly isScanningActive?: boolean;
   readonly totalScanned?: number;
+  // The scan stopped after a full batch of following profiles; the results so
+  // far are final and can be unfollowed before continuing with the next batch.
+  readonly batchReady?: boolean;
+  readonly batchesCompleted?: number;
 };
 
 type UnfollowingState = {

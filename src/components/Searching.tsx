@@ -11,6 +11,7 @@ export interface SearchingProps {
   setState: (state: State) => void;
   scanningPaused: boolean;
   pauseScan: () => void;
+  onContinueScan: () => void;
   handleScanFilter: (e: React.ChangeEvent<HTMLInputElement>) => void;
   toggleUser: (checked: boolean, user: UserNode) => void;
   UserCheckIcon: React.FC;
@@ -23,6 +24,7 @@ export const Searching = ({
   setState,
   scanningPaused,
   pauseScan,
+  onContinueScan,
   handleScanFilter,
   toggleUser,
   UserCheckIcon,
@@ -203,12 +205,23 @@ export const Searching = ({
             </div>
           )}
           <div className="sidebar-footer-controls">
-            <button
-              className="button-control button-pause"
-              onClick={pauseScan}
-            >
-              {scanningPaused ? t(lang, "resume") : t(lang, "pause")}
-            </button>
+            {state.batchReady && !state.isScanningActive ? (
+              <button
+                type="button"
+                className="button-control button-pause button-continue-scan"
+                title={t(lang, "continueScanHint")}
+                onClick={onContinueScan}
+              >
+                {t(lang, "continueScan")}
+              </button>
+            ) : (
+              <button
+                className="button-control button-pause"
+                onClick={pauseScan}
+              >
+                {scanningPaused ? t(lang, "resume") : t(lang, "pause")}
+              </button>
+            )}
             <div className="sidebar-pagination">
               <div className="pagination-controls">
                 <a
@@ -288,6 +301,11 @@ export const Searching = ({
         </button>
       </aside>
       <article className="results-container">
+        {state.batchReady && !state.isScanningActive && (
+          <div className="scan-warning-banner scan-batch-banner" role="status">
+            <span>{t(lang, "batchReadyBanner", state.batchesCompleted ?? 1, state.totalScanned ?? 0)}</span>
+          </div>
+        )}
         {state.scanIncomplete && (
           <div className="scan-warning-banner scan-incomplete-banner" role="alert">
             <span>{t(lang, "partialScanWarning")}</span>

@@ -6,6 +6,9 @@ import { Language, t } from "../utils/i18n";
 interface UnfollowingProps {
   state: State;
   handleUnfollowFilter: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  canContinueScan: boolean;
+  onContinueScan: () => void;
+  onBackToResults: () => void;
   lang: Language;
 }
 
@@ -13,6 +16,9 @@ export const Unfollowing = (
   {
     state,
     handleUnfollowFilter,
+    canContinueScan,
+    onContinueScan,
+    onBackToResults,
     lang,
   }: UnfollowingProps) => {
 
@@ -54,6 +60,16 @@ export const Unfollowing = (
           <>
             <hr />
             <div className="fs-large p-medium clr-green">{t(lang, "allDone")}</div>
+            <div className="unfollow-next-actions p-medium">
+              <button type="button" className="button-control" onClick={onBackToResults}>
+                {t(lang, "backToResults")}
+              </button>
+              {canContinueScan && (
+                <button type="button" className="button-control button-continue-scan" onClick={onContinueScan}>
+                  {t(lang, "continueScan")}
+                </button>
+              )}
+            </div>
             <hr />
           </>
         )}

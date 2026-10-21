@@ -121,6 +121,15 @@
     text-align: center;
     line-height: 1.2;
 
+    &.scan-batch-banner {
+      background: rgba(98, 214, 208, 0.12);
+      border: 1px solid rgba(98, 214, 208, 0.35);
+      color: #99f6e4;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      padding: 8px 12px;
+    }
+
     &.scan-incomplete-banner {
       background: rgba(239, 68, 68, 0.2);
       border: 1px solid rgba(239, 68, 68, 0.4);

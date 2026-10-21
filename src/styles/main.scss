@@ -2008,3 +2008,15 @@ html .iu button.load-cached-scan:hover {
         height: 3.5rem;
     }
 }
+
+.iu .button-continue-scan {
+    background: rgba(98, 214, 208, 0.28) !important;
+    border-color: rgba(98, 214, 208, 0.6) !important;
+    font-weight: 600;
+}
+
+.iu .unfollow-next-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
