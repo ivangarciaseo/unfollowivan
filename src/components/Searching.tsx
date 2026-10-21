@@ -1,5 +1,5 @@
 import React from "react";
-import { assertUnreachable, getCurrentPageUnfollowers, getMaxPage, getUsersForDisplay, isWithoutProfilePicture } from "../utils/utils";
+import { assertUnreachable, getCurrentPageUnfollowers, getFollowRatio, getMaxPage, getUsersForDisplay, isWithoutProfilePicture } from "../utils/utils";
 import { State } from "../model/state";
 import { UserNode } from "../model/user";
 import { WHITELISTED_RESULTS_STORAGE_KEY } from "../constants/constants";
@@ -31,9 +31,32 @@ export const Searching = ({
   UserUncheckIcon,
   lang,
 }: SearchingProps) => {
+  // Hooks go before the early return below.
+  const [ratioInput, setRatioInput] = React.useState(() =>
+    state.status === "scanning" && state.filter.maxRatio !== undefined && state.filter.maxRatio !== null
+      ? String(state.filter.maxRatio).replace(".", lang === "es" ? "," : ".")
+      : "",
+  );
+
   if (state.status !== "scanning") {
     return null;
   }
+
+  const numberFormat = new Intl.NumberFormat(lang === "es" ? "es-ES" : "en-US", { maximumFractionDigits: 1, notation: "compact" });
+  const ratioFormat = new Intl.NumberFormat(lang === "es" ? "es-ES" : "en-US", { maximumFractionDigits: 2 });
+  const formatCounts = (user: UserNode): string => {
+    const ratio = getFollowRatio(user);
+    if (ratio === null || user.follower_count === undefined || user.following_count === undefined) {
+      return t(lang, "noCounts");
+    }
+    return t(
+      lang,
+      "countsLine",
+      numberFormat.format(user.follower_count),
+      numberFormat.format(user.following_count),
+      Number.isFinite(ratio) ? ratioFormat.format(ratio) : "∞",
+    );
+  };
 
   const usersForDisplay = getUsersForDisplay(
     state.results,
@@ -122,7 +145,38 @@ export const Searching = ({
               />
               &nbsp;{t(lang, "noPic")}
             </label>
+            <label className="badge m-small">
+              <input
+                type="checkbox"
+                name="showFollowers"
+                checked={state.filter.showFollowers !== false}
+                onChange={handleScanFilter}
+              />
+              &nbsp;{t(lang, "showFollowers")}
+            </label>
           </menu>
+
+          <div className="ratio-filter">
+            <label htmlFor="maxRatio">{t(lang, "maxRatio")}</label>
+            <input
+              id="maxRatio"
+              type="text"
+              inputMode="decimal"
+              placeholder={t(lang, "maxRatioPlaceholder")}
+              value={ratioInput}
+              onChange={e => {
+                const text = e.currentTarget.value;
+                setRatioInput(text);
+                const parsed = text.trim() === "" ? null : Number(text.replace(",", "."));
+                if (parsed !== null && (!Number.isFinite(parsed) || parsed < 0)) {
+                  return;
+                }
+                // Selection is cleared so nothing hidden by the filter stays queued.
+                setState({ ...state, page: 1, selectedResults: [], filter: { ...state.filter, maxRatio: parsed } });
+              }}
+            />
+            <small>{t(lang, "maxRatioHint")}</small>
+          </div>
 
           <div className="sidebar-buttons-grid">
             <button
@@ -410,7 +464,9 @@ export const Searching = ({
                       {user.username}
                     </a>
                     <span className="fs-medium">{user.full_name}</span>
+                    <span className="account-counts">{formatCounts(user)}</span>
                   </div>
+                  {user.follows_viewer && <div className="follows-you-badge">{t(lang, "followsYou")}</div>}
                   {user.is_verified && <div className="verified-badge">✔</div>}
                   {user.is_private && (
                     <div className="flex justify-center w-100">

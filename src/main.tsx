@@ -14,7 +14,7 @@ import {
   DEFAULT_USERS_PER_SEARCH_CYCLE,
   CHECKS_BEFORE_REST,
   FOLLOWING_PAGE_SAFETY_LIMIT,
-  DEFAULT_FOLLOWING_PER_BLOCK,
+  DEFAULT_BLOCK_SIZE,
   DEFAULT_TIME_BETWEEN_PROFILE_BATCHES,
   INSTAGRAM_HOSTNAME,
   RATE_LIMIT_COOLDOWN_SECONDS,
@@ -23,6 +23,7 @@ import {
   assertUnreachable,
   fetchFriendshipsPage,
   fetchFriendshipStatus,
+  fetchUserCounts,
   getCookie,
   getCurrentPageUnfollowers,
   getUsersForDisplay,
@@ -31,9 +32,11 @@ import {
   rawFriendshipUserToUserNode,
   sleep,
   unfollowUser,
+  UserCounts,
 } from "./utils/utils";
 import { NotSearching } from "./components/NotSearching";
 import { State } from "./model/state";
+import { ScanningFilter } from "./model/scanning-filter";
 import { Searching } from "./components/Searching";
 import { Toolbar } from "./components/Toolbar";
 import { Unfollowing } from "./components/Unfollowing";
@@ -41,7 +44,7 @@ import { Timings } from "./model/timings";
 import { loadCachedScanResults, loadTimings, loadWhitelist, saveCachedScanResults, saveTimings, saveWhitelist } from "./utils/whitelist-manager";
 import { getInitialLanguage, Language, saveLanguage, t } from "./utils/i18n";
 
-// A scan walks the viewer's following list in blocks (300 accounts by
+// A scan walks the viewer's following list in blocks (150 accounts by
 // default). Each block is loaded, then every account in it is checked one by
 // one, and the scan stops so its non-followers can be unfollowed before the
 // next block. All of this survives between runs of the scan effect.
@@ -168,7 +171,7 @@ function App() {
       timeBetweenUnfollows: storedTimings?.timeBetweenUnfollows ?? DEFAULT_TIME_BETWEEN_UNFOLLOWS,
       timeToWaitAfterFiveUnfollows: storedTimings?.timeToWaitAfterFiveUnfollows ?? DEFAULT_TIME_TO_WAIT_AFTER_FIVE_UNFOLLOWS,
       usersPerSearchCycle: storedTimings?.usersPerSearchCycle ?? DEFAULT_USERS_PER_SEARCH_CYCLE,
-      followingPerBlock: storedTimings?.followingPerBlock ?? DEFAULT_FOLLOWING_PER_BLOCK,
+      blockSize: storedTimings?.blockSize ?? DEFAULT_BLOCK_SIZE,
       timeBetweenProfileBatches: storedTimings?.timeBetweenProfileBatches ?? DEFAULT_TIME_BETWEEN_PROFILE_BATCHES,
     };
   });
@@ -192,6 +195,14 @@ function App() {
   // Bumped to (re)start the scan effect for the next batch while the status
   // stays "scanning".
   const [scanRunToken, setScanRunToken] = useState(0);
+  // Filters (ratio, "follow you", ...) are kept from one block to the next,
+  // including across the unfollow screen.
+  const lastScanFilterRef = React.useRef<ScanningFilter | null>(null);
+  useEffect(() => {
+    if (state.status === "scanning") {
+      lastScanFilterRef.current = state.filter;
+    }
+  });
 
   const pauseScan = () => {
     setScanningPaused(prev => {
@@ -344,7 +355,7 @@ function App() {
     results: [...session.nonFollowers],
     selectedResults: [],
     whitelistedResults: loadWhitelist(),
-    filter: {
+    filter: lastScanFilterRef.current ?? {
       showVerified: true,
       showPrivate: true,
       showWithOutProfilePicture: true,
@@ -546,7 +557,7 @@ function App() {
       }
     };
 
-    const blockSize = Math.max(1, timings.followingPerBlock ?? DEFAULT_FOLLOWING_PER_BLOCK);
+    const blockSize = Math.max(1, timings.blockSize ?? DEFAULT_BLOCK_SIZE);
     const usersPerRequest = Math.max(1, timings.usersPerSearchCycle ?? DEFAULT_USERS_PER_SEARCH_CYCLE);
     const restDuration = Math.max(0, timings.timeBetweenProfileBatches ?? DEFAULT_TIME_BETWEEN_PROFILE_BATCHES);
     let requestsSinceRest = 0;
@@ -711,8 +722,15 @@ function App() {
         const user = session.pending[0];
         const userId = String(user.pk_id ?? user.pk);
         const result = await withRetry(`friendship check for ${user.username}`, () => fetchFriendshipStatus(userId));
+        // An account the viewer no longer follows needs no numbers.
+        const stillFollowed = result.ok && result.value.following !== false;
+        let counts: RetryResult<UserCounts> | null = null;
+        if (stillFollowed) {
+          await paceRequest();
+          counts = await withRetry(`counts for ${user.username}`, () => fetchUserCounts(userId));
+        }
 
-        if (!result.ok && result.blocked) {
+        if ((!result.ok && result.blocked) || (counts !== null && !counts.ok && counts.blocked)) {
           stopBlock(true);
           setToast({
             show: true,
@@ -725,11 +743,12 @@ function App() {
         session.blockChecked++;
         session.checkedCount++;
 
+        // Every account still followed is listed, following back or not, with
+        // its follower/following numbers so it can be filtered by ratio.
         // Non-retryable errors (deleted / unavailable account) are skipped.
-        // An account the viewer no longer follows is not listed either.
         const newNonFollower =
-          result.ok && result.value.followed_by === false && result.value.following !== false
-            ? rawFriendshipUserToUserNode(user, false)
+          result.ok && stillFollowed
+            ? rawFriendshipUserToUserNode(user, result.value.followed_by === true, counts?.ok ? counts.value : undefined)
             : null;
         if (newNonFollower !== null) {
           session.nonFollowers.push(newNonFollower);
@@ -783,7 +802,7 @@ function App() {
       stopBlock(false);
       setToast({
         show: true,
-        text: t(lang, "batchReadyToast", session.blockNumber, session.blockTotal, session.nonFollowers.length),
+        text: t(lang, "batchReadyToast", session.blockNumber, session.blockTotal, session.nonFollowers.filter(u => !u.follows_viewer).length),
       });
     };
     scan();

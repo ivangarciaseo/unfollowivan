@@ -99,10 +99,15 @@ export function getUsersForDisplay(
     if (!filter.showVerified && result.is_verified) {
       continue;
     }
-    // Scans only keep accounts that don't follow back; this also hides
-    // mutuals stored by older cached scans.
-    if (result.follows_viewer) {
+    if (result.follows_viewer && filter.showFollowers === false) {
       continue;
+    }
+    if (filter.maxRatio !== undefined && filter.maxRatio !== null) {
+      const ratio = getFollowRatio(result);
+      // Accounts without numbers can't meet a ratio requirement.
+      if (ratio === null || ratio > filter.maxRatio) {
+        continue;
+      }
     }
     if (!filter.showWithOutProfilePicture && isWithoutProfilePicture(result)) {
       continue;
@@ -116,6 +121,18 @@ export function getUsersForDisplay(
     users.push(result);
   }
   return users;
+}
+
+// Followers divided by following. Infinity when the account follows nobody;
+// null when the numbers are unknown.
+export function getFollowRatio(user: UserNode): number | null {
+  if (user.follower_count === undefined || user.following_count === undefined) {
+    return null;
+  }
+  if (user.following_count === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return user.follower_count / user.following_count;
 }
 
 export function getUnfollowLogForDisplay(log: readonly UnfollowLogEntry[], searchTerm: string, filter: UnfollowFilter) {
@@ -476,7 +493,37 @@ export async function fetchFriendshipStatus(userId: string): Promise<FriendshipS
   return data as FriendshipStatus;
 }
 
-export function rawFriendshipUserToUserNode(raw: RawFriendshipUser, followsViewer: boolean): UserNode {
+export interface UserCounts {
+  readonly follower_count: number;
+  readonly following_count: number;
+}
+
+// Follower and following counts of one account (one request per account).
+export async function fetchUserCounts(userId: string): Promise<UserCounts> {
+  const csrftoken = getCookie('csrftoken') || '';
+  const headers: Record<string, string> = {
+    'X-IG-App-ID': INSTAGRAM_WEB_APP_ID,
+    'X-ASBD-ID': INSTAGRAM_ASBD_ID,
+    'X-Requested-With': 'XMLHttpRequest',
+    'Accept': '*/*',
+  };
+  if (csrftoken) {
+    headers['X-CSRFToken'] = csrftoken;
+  }
+  const url = `https://www.instagram.com/api/v1/users/${encodeURIComponent(userId)}/info/`;
+  const response = await fetch(url, { credentials: 'same-origin', headers });
+  if (!response.ok) {
+    throw new InstagramApiError(response.status, `Instagram returned HTTP ${response.status} for ${url}`);
+  }
+  const data = (await response.json()) as any;
+  const user = data?.user;
+  if (data?.status === 'fail' || typeof user?.follower_count !== 'number' || typeof user?.following_count !== 'number') {
+    throw new InstagramApiError(response.status, data?.message || `Instagram returned no counts for ${url}`);
+  }
+  return { follower_count: user.follower_count, following_count: user.following_count };
+}
+
+export function rawFriendshipUserToUserNode(raw: RawFriendshipUser, followsViewer: boolean, counts?: UserCounts): UserNode {
   return {
     id: String(raw.pk_id ?? raw.pk),
     username: raw.username,
@@ -490,6 +537,7 @@ export function rawFriendshipUserToUserNode(raw: RawFriendshipUser, followsViewe
     followed_by_viewer: true,
     requested_by_viewer: false,
     follows_viewer: followsViewer,
+    ...(counts ?? {}),
   };
 }
 

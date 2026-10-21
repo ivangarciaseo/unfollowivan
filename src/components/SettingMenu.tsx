@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Timings } from "../model/timings";
 import { UserNode } from "../model/user";
 import { WhitelistManager } from "./WhitelistManager";
-import { DEFAULT_FOLLOWING_PER_BLOCK, DEFAULT_TIME_BETWEEN_PROFILE_BATCHES, DEFAULT_USERS_PER_SEARCH_CYCLE } from "../constants/constants";
+import { DEFAULT_BLOCK_SIZE, DEFAULT_TIME_BETWEEN_PROFILE_BATCHES, DEFAULT_USERS_PER_SEARCH_CYCLE } from "../constants/constants";
 import { Language, t } from "../utils/i18n";
 
 interface SettingMenuProps {
@@ -29,7 +29,7 @@ export const SettingMenu = ({
   const [timeBetweenUnfollows, setTimeBetweenUnfollows] = useState(currentTimings.timeBetweenUnfollows);
   const [timeToWaitAfterFiveUnfollows, setTimeToWaitAfterFiveUnfollows] = useState(currentTimings.timeToWaitAfterFiveUnfollows);
   const [usersPerSearchCycle, setUsersPerSearchCycle] = useState(currentTimings.usersPerSearchCycle ?? DEFAULT_USERS_PER_SEARCH_CYCLE);
-  const [followingPerBlock, setFollowingPerBlock] = useState(currentTimings.followingPerBlock ?? DEFAULT_FOLLOWING_PER_BLOCK);
+  const [blockSize, setBlockSize] = useState(currentTimings.blockSize ?? DEFAULT_BLOCK_SIZE);
   const [timeBetweenProfileBatches, setTimeBetweenProfileBatches] = useState(currentTimings.timeBetweenProfileBatches ?? DEFAULT_TIME_BETWEEN_PROFILE_BATCHES);
 
   const handleSave = (event: any) => {
@@ -40,7 +40,7 @@ export const SettingMenu = ({
       timeBetweenUnfollows,
       timeToWaitAfterFiveUnfollows,
       usersPerSearchCycle,
-      followingPerBlock,
+      blockSize,
       timeBetweenProfileBatches,
     });
     setSettingState(false);
@@ -137,15 +137,15 @@ export const SettingMenu = ({
               </div>
 
               <div className="row">
-                <label className="minimun-width">{t(lang, "followingPerBlock")}</label>
+                <label className="minimun-width">{t(lang, "blockSize")}</label>
                 <input
                   type="number"
-                  id="followingPerBlock"
-                  name="followingPerBlock"
+                  id="blockSize"
+                  name="blockSize"
                   min={10}
                   max={5000}
-                  value={followingPerBlock}
-                  onChange={(e) => handleInputChange(e, setFollowingPerBlock)}
+                  value={blockSize}
+                  onChange={(e) => handleInputChange(e, setBlockSize)}
                 />
                 <label className="margin-between-input-and-label">(users)</label>
               </div>

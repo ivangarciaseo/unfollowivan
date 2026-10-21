@@ -2020,3 +2020,40 @@ html .iu button.load-cached-scan:hover {
     gap: 0.75rem;
     flex-wrap: wrap;
 }
+
+.iu .account-counts {
+    font-size: 0.8rem;
+    color: var(--cyan);
+    opacity: 0.9;
+}
+
+.iu .follows-you-badge {
+    margin-left: 0.5rem;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid rgba(98, 214, 208, 0.5);
+    border-radius: 999px;
+    color: #99f6e4;
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.iu .ratio-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin: 0.5rem 0;
+    font-size: 0.8rem;
+}
+
+.iu .ratio-filter input {
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    color: inherit;
+}
+
+.iu .ratio-filter small {
+    opacity: 0.7;
+    line-height: 1.3;
+}

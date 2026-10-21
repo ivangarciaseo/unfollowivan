@@ -8,6 +8,10 @@ export interface UserNode {
     readonly followed_by_viewer: boolean;
     readonly follows_viewer: boolean;
     readonly requested_by_viewer: boolean;
+    // Filled in by the block scan with one extra request per account; missing
+    // when Instagram did not return them (or for older cached scans).
+    readonly follower_count?: number;
+    readonly following_count?: number;
     // Optional: populated only for the local preview/demo data. The private
     // REST endpoints used for real scans (see utils/utils.ts) don't return
     // story-reel data, and nothing in the app reads this field, so it's kept
