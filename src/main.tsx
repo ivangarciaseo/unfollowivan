@@ -14,7 +14,8 @@ import {
   DEFAULT_USERS_PER_SEARCH_CYCLE,
   FOLLOWERS_PAGE_SAFETY_LIMIT,
   FOLLOWING_PAGE_SAFETY_LIMIT,
-  CHECKS_BEFORE_LONG_SLEEP,
+  DEFAULT_PROFILES_PER_BATCH,
+  DEFAULT_TIME_BETWEEN_PROFILE_BATCHES,
   INSTAGRAM_HOSTNAME,
   RATE_LIMIT_COOLDOWN_SECONDS,
 } from "./constants/constants";
@@ -132,6 +133,8 @@ function App() {
       timeBetweenUnfollows: storedTimings?.timeBetweenUnfollows ?? DEFAULT_TIME_BETWEEN_UNFOLLOWS,
       timeToWaitAfterFiveUnfollows: storedTimings?.timeToWaitAfterFiveUnfollows ?? DEFAULT_TIME_TO_WAIT_AFTER_FIVE_UNFOLLOWS,
       usersPerSearchCycle: storedTimings?.usersPerSearchCycle ?? DEFAULT_USERS_PER_SEARCH_CYCLE,
+      profilesPerBatch: storedTimings?.profilesPerBatch ?? DEFAULT_PROFILES_PER_BATCH,
+      timeBetweenProfileBatches: storedTimings?.timeBetweenProfileBatches ?? DEFAULT_TIME_BETWEEN_PROFILE_BATCHES,
     };
   });
 
@@ -448,7 +451,37 @@ function App() {
       }
     };
 
-    let requestsSinceLongSleep = 0;
+    // Profiles are retrieved in batches of `profilesPerBatch` (1000 by default),
+    // counted across the followers and following lists together. Each request
+    // asks for at most the profiles left in the current batch, so a batch ends
+    // exactly on the limit; then the scan takes a long pause before the next one.
+    const profilesPerBatch = Math.max(1, timings.profilesPerBatch ?? DEFAULT_PROFILES_PER_BATCH);
+    const usersPerRequest = Math.max(1, timings.usersPerSearchCycle ?? DEFAULT_USERS_PER_SEARCH_CYCLE);
+    const timeBetweenBatches = Math.max(0, timings.timeBetweenProfileBatches ?? DEFAULT_TIME_BETWEEN_PROFILE_BATCHES);
+    let profilesInCurrentBatch = 0;
+    let batchesCompleted = 0;
+
+    const waitForNextBatchIfNeeded = async () => {
+      if (profilesInCurrentBatch < profilesPerBatch) {
+        return;
+      }
+      batchesCompleted++;
+      profilesInCurrentBatch = 0;
+      // +/- 10% jitter so the pauses don't follow an exact pattern.
+      const pause = Math.max(0, Math.round(timeBetweenBatches * (0.9 + Math.random() * 0.2)));
+      for (let remaining = Math.round(pause / 1000); remaining > 0; remaining--) {
+        while (scanningPausedRef.current) {
+          await sleep(1000);
+        }
+        setToast({
+          show: true,
+          text: t(lang, "batchPause", batchesCompleted, batchesCompleted * profilesPerBatch, remaining),
+        });
+        await sleep(1000);
+      }
+      setToast({ show: false });
+    };
+
     const paceRequest = async () => {
       // Pause scanning if user requested so.
       while (scanningPausedRef.current) {
@@ -458,21 +491,6 @@ function App() {
 
       await sleep(Math.floor(Math.random() * 700) + 300);
       await sleep(Math.floor(Math.random() * (timings.timeBetweenSearchCycles - timings.timeBetweenSearchCycles * 0.7)) + timings.timeBetweenSearchCycles);
-
-      requestsSinceLongSleep++;
-      if (requestsSinceLongSleep >= CHECKS_BEFORE_LONG_SLEEP) {
-        requestsSinceLongSleep = 0;
-        const longSleepVar = Math.max(
-          0,
-          timings.timeToWaitAfterFiveSearchCycles + (Math.random() * 10000 - 5000), // +/- 5 seconds
-        );
-        setToast({
-          show: true,
-          text: t(lang, "sleepingSafety", Math.round(longSleepVar / 1000)),
-        });
-        await sleep(longSleepVar);
-      }
-      setToast({ show: false });
     };
 
     // Walks the viewer's own list (followers or following) page by page. `onPageUsers` is
@@ -489,13 +507,16 @@ function App() {
 
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       while (true) {
-        const result = await fetchPageWithRetry(kind, maxId, timings.usersPerSearchCycle);
+        await waitForNextBatchIfNeeded();
+        const count = Math.max(1, Math.min(usersPerRequest, profilesPerBatch - profilesInCurrentBatch));
+        const result = await fetchPageWithRetry(kind, maxId, count);
         if (!result.ok) {
           console.error(`Stopping ${kind} scan early.`);
           return false;
         }
         const page = result.page;
         const pageUsers = page.users ?? [];
+        profilesInCurrentBatch += pageUsers.length;
 
         if (!(await onPageUsers(pageUsers))) {
           return false;

@@ -19,8 +19,6 @@ export const INSTAGRAM_UNFOLLOW_FRIENDLY_NAME = "usePolarisUnfollowMutation";
 // (see utils/utils.ts and main.tsx).
 export const FOLLOWING_PAGE_SAFETY_LIMIT = 250;
 export const FOLLOWERS_PAGE_SAFETY_LIMIT = 250;
-// A long safety sleep is taken once every this many scan requests.
-export const CHECKS_BEFORE_LONG_SLEEP = 15;
 export const RATE_LIMIT_COOLDOWN_SECONDS = 30;
 export const WHITELISTED_RESULTS_STORAGE_KEY = "iu_whitelisted-results";
 export const TIMINGS_STORAGE_KEY = "iu_timings";
@@ -33,6 +31,11 @@ export const DEFAULT_TIME_TO_WAIT_AFTER_FIVE_SEARCH_CYCLES = 10000;
 export const DEFAULT_TIME_BETWEEN_UNFOLLOWS = 4000;
 export const DEFAULT_TIME_TO_WAIT_AFTER_FIVE_UNFOLLOWS = 300000;
 export const DEFAULT_USERS_PER_SEARCH_CYCLE = 50;
+// Profiles are retrieved in batches: after every DEFAULT_PROFILES_PER_BATCH
+// profiles (followers + following, counted together) the scan takes a long
+// pause so Instagram doesn't rate-limit the session.
+export const DEFAULT_PROFILES_PER_BATCH = 1000;
+export const DEFAULT_TIME_BETWEEN_PROFILE_BATCHES = 60000;
 
 // FILTER CONSTANTS
 export const WITHOUT_PROFILE_PICTURE_URL_IDS = [

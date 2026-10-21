@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Timings } from "../model/timings";
 import { UserNode } from "../model/user";
 import { WhitelistManager } from "./WhitelistManager";
-import { DEFAULT_USERS_PER_SEARCH_CYCLE } from "../constants/constants";
+import { DEFAULT_PROFILES_PER_BATCH, DEFAULT_TIME_BETWEEN_PROFILE_BATCHES, DEFAULT_USERS_PER_SEARCH_CYCLE } from "../constants/constants";
 import { Language, t } from "../utils/i18n";
 
 interface SettingMenuProps {
@@ -25,10 +25,12 @@ export const SettingMenu = ({
   onLanguageChange,
 }: SettingMenuProps) => {
   const [timeBetweenSearchCycles, setTimeBetweenSearchCycles] = useState(currentTimings.timeBetweenSearchCycles);
-  const [timeToWaitAfterFiveSearchCycles, setTimeToWaitAfterFiveSearchCycles] = useState(currentTimings.timeToWaitAfterFiveSearchCycles);
+  const [timeToWaitAfterFiveSearchCycles] = useState(currentTimings.timeToWaitAfterFiveSearchCycles);
   const [timeBetweenUnfollows, setTimeBetweenUnfollows] = useState(currentTimings.timeBetweenUnfollows);
   const [timeToWaitAfterFiveUnfollows, setTimeToWaitAfterFiveUnfollows] = useState(currentTimings.timeToWaitAfterFiveUnfollows);
   const [usersPerSearchCycle, setUsersPerSearchCycle] = useState(currentTimings.usersPerSearchCycle ?? DEFAULT_USERS_PER_SEARCH_CYCLE);
+  const [profilesPerBatch, setProfilesPerBatch] = useState(currentTimings.profilesPerBatch ?? DEFAULT_PROFILES_PER_BATCH);
+  const [timeBetweenProfileBatches, setTimeBetweenProfileBatches] = useState(currentTimings.timeBetweenProfileBatches ?? DEFAULT_TIME_BETWEEN_PROFILE_BATCHES);
 
   const handleSave = (event: any) => {
     event.preventDefault();
@@ -38,6 +40,8 @@ export const SettingMenu = ({
       timeBetweenUnfollows,
       timeToWaitAfterFiveUnfollows,
       usersPerSearchCycle,
+      profilesPerBatch,
+      timeBetweenProfileBatches,
     });
     setSettingState(false);
   };
@@ -91,20 +95,6 @@ export const SettingMenu = ({
               </div>
 
               <div className="row">
-                <label className="minimun-width">{t(lang, "timeToWaitAfterFiveCycles")}</label>
-                <input
-                  type="number"
-                  id="fiveSearchCycles"
-                  name="fiveSearchCycles"
-                  min={4000}
-                  max={999999}
-                  value={timeToWaitAfterFiveSearchCycles}
-                  onChange={(e) => handleInputChange(e, setTimeToWaitAfterFiveSearchCycles)}
-                />
-                <label className="margin-between-input-and-label">(ms)</label>
-              </div>
-
-              <div className="row">
                 <label className="minimun-width">{t(lang, "timeBetweenUnfollows")}</label>
                 <input
                   type="number"
@@ -144,6 +134,34 @@ export const SettingMenu = ({
                   onChange={(e) => handleInputChange(e, setUsersPerSearchCycle)}
                 />
                 <label className="margin-between-input-and-label">(users)</label>
+              </div>
+
+              <div className="row">
+                <label className="minimun-width">{t(lang, "profilesPerBatch")}</label>
+                <input
+                  type="number"
+                  id="profilesPerBatch"
+                  name="profilesPerBatch"
+                  min={50}
+                  max={5000}
+                  value={profilesPerBatch}
+                  onChange={(e) => handleInputChange(e, setProfilesPerBatch)}
+                />
+                <label className="margin-between-input-and-label">(users)</label>
+              </div>
+
+              <div className="row">
+                <label className="minimun-width">{t(lang, "timeBetweenProfileBatches")}</label>
+                <input
+                  type="number"
+                  id="timeBetweenProfileBatches"
+                  name="timeBetweenProfileBatches"
+                  min={10000}
+                  max={999999}
+                  value={timeBetweenProfileBatches}
+                  onChange={(e) => handleInputChange(e, setTimeBetweenProfileBatches)}
+                />
+                <label className="margin-between-input-and-label">(ms)</label>
               </div>
 
               <div className="warning-container">
