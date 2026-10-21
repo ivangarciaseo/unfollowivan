@@ -21,6 +21,12 @@ type ScanningState = {
   // far are final and can be unfollowed before continuing with the next batch.
   readonly batchReady?: boolean;
   readonly batchesCompleted?: number;
+  // The current block was cut short (e.g. Instagram rate limit); the accounts
+  // checked so far are final and the rest are checked on "Continue scan".
+  readonly blockInterrupted?: boolean;
+  readonly blockNumber?: number;
+  readonly blockChecked?: number;
+  readonly blockTotal?: number;
 };
 
 type UnfollowingState = {

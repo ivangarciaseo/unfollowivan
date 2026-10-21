@@ -443,6 +443,39 @@ async function fetchFriendshipsPageFromUrl(url: string, headers?: Record<string,
   return data as FriendshipsPage;
 }
 
+export interface FriendshipStatus {
+  readonly following?: boolean;
+  readonly followed_by?: boolean;
+  readonly outgoing_request?: boolean;
+}
+
+// Asks Instagram whether one account follows the viewer (`followed_by`) and
+// whether the viewer still follows it (`following`). This is the only
+// per-account check the web API offers: friendships/show_many/ does not exist
+// on www.instagram.com (it answers with an HTML page).
+export async function fetchFriendshipStatus(userId: string): Promise<FriendshipStatus> {
+  const csrftoken = getCookie('csrftoken') || '';
+  const headers: Record<string, string> = {
+    'X-IG-App-ID': INSTAGRAM_WEB_APP_ID,
+    'X-ASBD-ID': INSTAGRAM_ASBD_ID,
+    'X-Requested-With': 'XMLHttpRequest',
+    'Accept': '*/*',
+  };
+  if (csrftoken) {
+    headers['X-CSRFToken'] = csrftoken;
+  }
+  const url = `https://www.instagram.com/api/v1/friendships/show/${encodeURIComponent(userId)}/`;
+  const response = await fetch(url, { credentials: 'same-origin', headers });
+  if (!response.ok) {
+    throw new InstagramApiError(response.status, `Instagram returned HTTP ${response.status} for ${url}`);
+  }
+  const data = (await response.json()) as any;
+  if (data?.status === 'fail' || typeof data?.followed_by !== 'boolean') {
+    throw new InstagramApiError(response.status, data?.message || `Instagram returned no friendship status for ${url}`);
+  }
+  return data as FriendshipStatus;
+}
+
 export function rawFriendshipUserToUserNode(raw: RawFriendshipUser, followsViewer: boolean): UserNode {
   return {
     id: String(raw.pk_id ?? raw.pk),

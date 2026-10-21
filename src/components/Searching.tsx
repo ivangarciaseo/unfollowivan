@@ -179,6 +179,9 @@ export const Searching = ({
           )}
           <div className="sidebar-stats metric-stack">
             <p><span>{t(lang, "displayed")}</span><strong>{usersForDisplay.length}</strong></p>
+            {state.blockNumber !== undefined && state.blockNumber > 0 && (
+              <p><span>{t(lang, "block", state.blockNumber)}</span><strong>{state.blockChecked ?? 0}/{state.blockTotal ?? 0}</strong></p>
+            )}
             <p><span>{t(lang, "totalScanned")}</span><strong>{state.totalScanned ?? state.results.length}</strong></p>
             <p className="whitelist-counter">
               <span>{t(lang, "whitelist")}</span><strong>★ {state.whitelistedResults.length}</strong>
@@ -303,7 +306,11 @@ export const Searching = ({
       <article className="results-container">
         {state.batchReady && !state.isScanningActive && (
           <div className="scan-warning-banner scan-batch-banner" role="status">
-            <span>{t(lang, "batchReadyBanner", state.batchesCompleted ?? 1, state.totalScanned ?? 0)}</span>
+            <span>
+              {state.blockInterrupted
+                ? t(lang, "blockInterruptedBanner", state.blockNumber ?? 1, state.blockChecked ?? 0, state.blockTotal ?? 0)
+                : t(lang, "batchReadyBanner", state.blockNumber ?? 1, state.blockTotal ?? 0)}
+            </span>
           </div>
         )}
         {state.scanIncomplete && (

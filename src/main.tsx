@@ -12,7 +12,7 @@ import {
   DEFAULT_TIME_TO_WAIT_AFTER_FIVE_SEARCH_CYCLES,
   DEFAULT_TIME_TO_WAIT_AFTER_FIVE_UNFOLLOWS,
   DEFAULT_USERS_PER_SEARCH_CYCLE,
-  FOLLOWERS_PAGE_SAFETY_LIMIT,
+  CHECKS_BEFORE_REST,
   FOLLOWING_PAGE_SAFETY_LIMIT,
   DEFAULT_PROFILES_PER_BATCH,
   DEFAULT_TIME_BETWEEN_PROFILE_BATCHES,
@@ -20,17 +20,13 @@ import {
   RATE_LIMIT_COOLDOWN_SECONDS,
 } from "./constants/constants";
 import {
-  addFollowerToIndex,
   assertUnreachable,
-  createFollowerIndex,
   fetchFriendshipsPage,
-  FriendshipsListKind,
-  FriendshipsPage,
+  fetchFriendshipStatus,
   getCookie,
   getCurrentPageUnfollowers,
   getUsersForDisplay,
   InstagramApiError,
-  isUserInFollowerIndex,
   RawFriendshipUser,
   rawFriendshipUserToUserNode,
   sleep,
@@ -45,10 +41,20 @@ import { Timings } from "./model/timings";
 import { loadCachedScanResults, loadTimings, loadWhitelist, saveCachedScanResults, saveTimings, saveWhitelist } from "./utils/whitelist-manager";
 import { getInitialLanguage, Language, saveLanguage, t } from "./utils/i18n";
 
+// A scan walks the viewer's following list in blocks (1000 accounts by
+// default). Each block is loaded, then every account in it is checked one by
+// one, and the scan stops so its non-followers can be unfollowed before the
+// next block. All of this survives between runs of the scan effect.
 interface ScanSession {
-  readonly followerIndex: ReturnType<typeof createFollowerIndex>;
-  // Cursor into the viewer's following list where the next batch starts.
+  // Cursor into the following list just after the current block.
   followingMaxId: string | undefined;
+  // The following list has been fetched to its end.
+  listExhausted: boolean;
+  // Accounts of the current block that still have to be checked.
+  pending: RawFriendshipUser[];
+  blockNumber: number;
+  blockTotal: number;
+  blockChecked: number;
   readonly seenFollowingIds: Set<string>;
   nonFollowers: UserNode[];
   checkedCount: number;
@@ -58,6 +64,21 @@ interface ScanSession {
   unfollowedSinceCursor: number;
   finished: boolean;
 }
+
+const newScanSession = (): ScanSession => ({
+  followingMaxId: undefined,
+  listExhausted: false,
+  pending: [],
+  blockNumber: 0,
+  blockTotal: 0,
+  blockChecked: 0,
+  seenFollowingIds: new Set<string>(),
+  nonFollowers: [],
+  checkedCount: 0,
+  batchesCompleted: 0,
+  unfollowedSinceCursor: 0,
+  finished: false,
+});
 
 const LOCAL_PREVIEW_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const isLocalPreview = LOCAL_PREVIEW_HOSTS.has(location.hostname);
@@ -310,9 +331,13 @@ function App() {
     page: 1,
     searchTerm,
     currentTab: "non_whitelisted",
-    percentage: session.finished ? 100 : Math.min(99, 50 + Math.round(50 * (1 - 1 / (1 + session.checkedCount / 150)))),
+    percentage: session.finished ? 100 : session.blockTotal > 0 ? Math.min(99, Math.round((100 * session.blockChecked) / session.blockTotal)) : 0,
     isScanningActive: false,
     batchReady: !session.finished,
+    blockInterrupted: session.pending.length > 0,
+    blockNumber: session.blockNumber,
+    blockChecked: session.blockChecked,
+    blockTotal: session.blockTotal,
     batchesCompleted: session.batchesCompleted,
     totalScanned: session.checkedCount,
     // A copy: the session keeps appending to its own array during the scan.
@@ -476,26 +501,21 @@ function App() {
   }, [isActiveProcess, state]);
 
   useEffect(() => {
-    // Fetches one page, retrying with backoff on rate limits / network errors.
+    // Runs a request, retrying with backoff on rate limits / network errors.
     // `blocked` is true when retries were exhausted for such a transient error
-    // (the scan should stop); false means a different, non-retryable error
-    // (e.g. 404 / unavailable account), which callers may choose to skip.
-    type PageResult =
-      | { readonly ok: true; readonly page: FriendshipsPage }
+    // (the scan should stop and can be continued later); false means a
+    // different, non-retryable error (e.g. 404 / unavailable account).
+    type RetryResult<T> =
+      | { readonly ok: true; readonly value: T }
       | { readonly ok: false; readonly blocked: boolean };
 
-    const fetchPageWithRetry = async (
-      kind: FriendshipsListKind,
-      maxId?: string,
-      count?: number,
-      userId?: string,
-    ): Promise<PageResult> => {
+    const withRetry = async <T,>(label: string, op: () => Promise<T>): Promise<RetryResult<T>> => {
       let retries = 0;
       const maxRetries = 3;
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       while (true) {
         try {
-          return { ok: true, page: await fetchFriendshipsPage(kind, maxId, count, userId) };
+          return { ok: true, value: await op() };
         } catch (e: any) {
           const status = e?.status;
           const message = String(e?.message ?? "");
@@ -508,7 +528,7 @@ function App() {
           if (isTransient && retries < maxRetries) {
             retries++;
             const waitSeconds = isRateLimitOrSoftBlock
-              ? RATE_LIMIT_COOLDOWN_SECONDS * retries
+              ? RATE_LIMIT_COOLDOWN_SECONDS * 2 * retries
               : 5 * retries;
             for (let sec = waitSeconds; sec > 0; sec--) {
               setToast({
@@ -520,112 +540,100 @@ function App() {
             setToast({ show: false });
             continue;
           }
-          console.error(`${kind} request failed${userId ? ` for ${userId}` : ""}:`, e);
+          console.error(`${label} failed:`, e);
           return { ok: false, blocked: isTransient };
         }
       }
     };
 
-    // Profiles are retrieved in batches of `profilesPerBatch` (1000 by default),
-    // counted across the followers and following lists together. Each request
-    // asks for at most the profiles left in the current batch, so a batch ends
-    // exactly on the limit; then the scan takes a long pause before the next one.
-    const profilesPerBatch = Math.max(1, timings.profilesPerBatch ?? DEFAULT_PROFILES_PER_BATCH);
+    const blockSize = Math.max(1, timings.profilesPerBatch ?? DEFAULT_PROFILES_PER_BATCH);
     const usersPerRequest = Math.max(1, timings.usersPerSearchCycle ?? DEFAULT_USERS_PER_SEARCH_CYCLE);
-    const timeBetweenBatches = Math.max(0, timings.timeBetweenProfileBatches ?? DEFAULT_TIME_BETWEEN_PROFILE_BATCHES);
-    let profilesInCurrentBatch = 0;
-    let batchesCompleted = 0;
+    const restDuration = Math.max(0, timings.timeBetweenProfileBatches ?? DEFAULT_TIME_BETWEEN_PROFILE_BATCHES);
+    let requestsSinceRest = 0;
 
-    const waitForNextBatchIfNeeded = async () => {
-      if (profilesInCurrentBatch < profilesPerBatch) {
-        return;
-      }
-      batchesCompleted++;
-      profilesInCurrentBatch = 0;
-      // +/- 10% jitter so the pauses don't follow an exact pattern.
-      const pause = Math.max(0, Math.round(timeBetweenBatches * (0.9 + Math.random() * 0.2)));
-      for (let remaining = Math.round(pause / 1000); remaining > 0; remaining--) {
-        while (scanningPausedRef.current) {
-          await sleep(1000);
-        }
-        setToast({
-          show: true,
-          text: t(lang, "batchPause", batchesCompleted, batchesCompleted * profilesPerBatch, remaining),
-        });
-        await sleep(1000);
-      }
-      setToast({ show: false });
-    };
-
+    // Waits between two requests: a short random gap every time, and a longer
+    // rest every CHECKS_BEFORE_REST requests. Also honours the Pause button.
     const paceRequest = async () => {
-      // Pause scanning if user requested so.
       while (scanningPausedRef.current) {
         await sleep(1000);
-        console.info("Scan paused");
       }
 
       await sleep(Math.floor(Math.random() * 700) + 300);
       await sleep(Math.floor(Math.random() * (timings.timeBetweenSearchCycles - timings.timeBetweenSearchCycles * 0.7)) + timings.timeBetweenSearchCycles);
+
+      requestsSinceRest++;
+      if (requestsSinceRest >= CHECKS_BEFORE_REST && restDuration > 0) {
+        requestsSinceRest = 0;
+        // +/- 10% jitter so the rests don't follow an exact pattern.
+        const rest = Math.round(restDuration * (0.9 + Math.random() * 0.2));
+        for (let remaining = Math.round(rest / 1000); remaining > 0; remaining--) {
+          while (scanningPausedRef.current) {
+            await sleep(1000);
+          }
+          setToast({ show: true, text: t(lang, "sleepingSafety", remaining) });
+          await sleep(1000);
+        }
+        setToast({ show: false });
+      }
     };
 
-    // Walks the viewer's own list (followers or following) page by page,
-    // starting at `startMaxId` when given. `onPageUsers` is awaited for each
-    // page before the next one is requested and returns false to stop the walk
-    // early. With `stopAtBatchEnd`, the walk stops once the current batch of
-    // `profilesPerBatch` profiles is full (status "batch_end") and hands back
-    // the cursor to resume from; otherwise a full batch only triggers the long
-    // pause.
-    type ListWalkResult =
-      | { readonly status: "complete" }
-      | { readonly status: "failed" }
-      | { readonly status: "batch_end"; readonly nextMaxId: string };
+    const blockProgress = (session: ScanSession) =>
+      session.blockTotal > 0 ? Math.min(99, Math.round((100 * session.blockChecked) / session.blockTotal)) : 0;
 
-    const fetchList = async (
-      kind: FriendshipsListKind,
-      pageSafetyLimit: number,
-      onPageUsers: (pageUsers: readonly RawFriendshipUser[]) => Promise<boolean>,
-      options: { readonly startMaxId?: string; readonly stopAtBatchEnd?: boolean } = {},
-    ): Promise<ListWalkResult> => {
-      let maxId: string | undefined = options.startMaxId;
+    // Loads the next block of the following list into `session.pending`.
+    // Returns false if Instagram could not be reached.
+    const loadNextBlock = async (session: ScanSession): Promise<boolean> => {
+      // Instagram pages the following list with a numeric offset. Accounts
+      // unfollowed since the cursor was saved shift everything after them
+      // back, so rewind the offset by that many; anything seen twice is skipped.
+      let maxId = session.followingMaxId;
+      if (maxId !== undefined && /^\d+$/.test(maxId) && session.unfollowedSinceCursor > 0) {
+        maxId = String(Math.max(0, Number(maxId) - session.unfollowedSinceCursor));
+      }
+
+      const block: RawFriendshipUser[] = [];
       let pagesFetched = 0;
-
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      while (true) {
-        if (!options.stopAtBatchEnd) {
-          await waitForNextBatchIfNeeded();
-        }
-        const count = Math.max(1, Math.min(usersPerRequest, profilesPerBatch - profilesInCurrentBatch));
-        const result = await fetchPageWithRetry(kind, maxId, count);
+      let reachedEnd = false;
+      while (block.length < blockSize) {
+        const count = Math.max(1, Math.min(usersPerRequest, blockSize - block.length));
+        const result = await withRetry("following request", () => fetchFriendshipsPage("following", maxId, count));
         if (!result.ok) {
-          console.error(`Stopping ${kind} scan early.`);
-          return { status: "failed" };
+          return false;
         }
-        const page = result.page;
+        const page = result.value;
         const pageUsers = page.users ?? [];
-        profilesInCurrentBatch += pageUsers.length;
-
-        if (!(await onPageUsers(pageUsers))) {
-          return { status: "failed" };
+        for (const user of pageUsers) {
+          const userId = String(user.pk_id ?? user.pk);
+          if (session.seenFollowingIds.has(userId)) {
+            continue;
+          }
+          session.seenFollowingIds.add(userId);
+          block.push(user);
         }
+        setToast({ show: true, text: t(lang, "loadingBlock", session.blockNumber + 1, block.length) });
 
         const hasMore = Boolean(page.next_max_id) && page.has_more !== false;
         if (!hasMore || pageUsers.length === 0) {
-          return { status: "complete" };
-        }
-
-        pagesFetched += 1;
-        if (pagesFetched >= pageSafetyLimit) {
-          console.error(`Stopping ${kind} scan early: hit the safety cap of ${pageSafetyLimit} pages.`);
-          return { status: "failed" };
+          reachedEnd = true;
+          break;
         }
         maxId = page.next_max_id as string;
-
-        if (options.stopAtBatchEnd && profilesInCurrentBatch >= profilesPerBatch) {
-          return { status: "batch_end", nextMaxId: maxId };
+        pagesFetched++;
+        if (pagesFetched >= FOLLOWING_PAGE_SAFETY_LIMIT) {
+          reachedEnd = true;
+          break;
         }
-
         await paceRequest();
       }
+
+      session.followingMaxId = maxId;
+      session.unfollowedSinceCursor = 0;
+      session.listExhausted = reachedEnd;
+      session.pending = block;
+      session.blockNumber++;
+      session.blockTotal = block.length;
+      session.blockChecked = 0;
+      return true;
     };
 
     const scan = async () => {
@@ -642,218 +650,140 @@ function App() {
         return;
       }
 
-      // A session survives between batches: it keeps the follower index and
-      // the cursor into the following list so "Continue scan" picks up where
-      // the previous batch stopped.
-      let session = scanSessionRef.current;
-
-      if (session === null) {
-        // Phase 1: Retrieve and index all of the viewer's followers.
-        // We dual-index by ID and normalized lowercase username to guarantee zero false positives.
-        // Followers are still fetched in batches (with the long pause between
-        // them), but nothing can be acted on until the whole list is indexed:
-        // a partial index would flag real followers as non-followers.
-        const followerIndex = createFollowerIndex();
-        let followersCount = 0;
-
-        const indexFollowersPage = async (pageUsers: readonly RawFriendshipUser[]): Promise<boolean> => {
-          for (const user of pageUsers) {
-            addFollowerToIndex(followerIndex, user);
-            followersCount++;
-          }
-
-          const followersProgress = Math.min(49, Math.round(50 * (1 - 1 / (1 + followersCount / 150))));
-          setState(prevState =>
-            prevState.status === "scanning"
-              ? {
-                  ...prevState,
-                  percentage: followersProgress,
-                  totalScanned: followersCount,
-                }
-              : prevState,
-          );
-
-          setToast({
-            show: true,
-            text: t(lang, "indexingFollowersProgress", followersCount),
-          });
-
-          return true;
-        };
-
-        const followersResult = await fetchList(
-          "followers",
-          FOLLOWERS_PAGE_SAFETY_LIMIT,
-          indexFollowersPage,
-        );
-
-        if (followersResult.status !== "complete") {
-          // If followers list could not be fully loaded, aborting is mandatory.
-          // Proceeding with an incomplete follower index would cause true followers
-          // to be falsely flagged as unfollowers.
-          setState(prevState =>
-            prevState.status === "scanning"
-              ? { ...prevState, isScanningActive: false, scanIncomplete: true }
-              : prevState,
-          );
-          setToast({
-            show: true,
-            text: t(lang, "scanFailedFollowers"),
-          });
-          return;
-        }
-
-        session = {
-          followerIndex,
-          followingMaxId: undefined,
-          seenFollowingIds: new Set<string>(),
-          nonFollowers: [],
-          checkedCount: 0,
-          batchesCompleted: 0,
-          unfollowedSinceCursor: 0,
-          finished: false,
-        };
-        scanSessionRef.current = session;
-
-        // Mark Phase 1 complete at 50%
-        setState(prevState =>
-          prevState.status === "scanning"
-            ? { ...prevState, percentage: 50 }
-            : prevState,
-        );
-
-        // The first following batch waits out the usual pause if the followers
-        // phase just filled a batch.
-        await waitForNextBatchIfNeeded();
+      if (scanSessionRef.current === null) {
+        scanSessionRef.current = newScanSession();
       }
+      const session = scanSessionRef.current;
 
-      const activeSession = session;
-      // Each following batch holds exactly `profilesPerBatch` profiles.
-      profilesInCurrentBatch = 0;
-
-      // Instagram pages the following list with a numeric offset. Accounts
-      // unfollowed since the cursor was saved shift everything after them back,
-      // so rewind the offset by that many; anything seen twice is skipped below.
-      let startMaxId = activeSession.followingMaxId;
-      if (startMaxId !== undefined && /^\d+$/.test(startMaxId) && activeSession.unfollowedSinceCursor > 0) {
-        startMaxId = String(Math.max(0, Number(startMaxId) - activeSession.unfollowedSinceCursor));
-      }
-      activeSession.unfollowedSinceCursor = 0;
-
-      // Phase 2: Walk the viewer's following list and check each against the follower index.
-      // Accounts not in the index genuinely do not follow back and are progressively streamed to UI.
-      const checkFollowingPage = async (pageUsers: readonly RawFriendshipUser[]): Promise<boolean> => {
-        const newNonFollowersBatch: UserNode[] = [];
-
-        for (const user of pageUsers) {
-          const userId = String(user.pk_id ?? user.pk);
-          if (activeSession.seenFollowingIds.has(userId)) {
-            continue;
-          }
-          activeSession.seenFollowingIds.add(userId);
-          const followsViewer = isUserInFollowerIndex(activeSession.followerIndex, user);
-          if (!followsViewer) {
-            const node = rawFriendshipUserToUserNode(user, false);
-            activeSession.nonFollowers.push(node);
-            newNonFollowersBatch.push(node);
-          }
-          activeSession.checkedCount++;
-        }
-
-        const followingProgress = Math.min(99, 50 + Math.round(50 * (1 - 1 / (1 + activeSession.checkedCount / 150))));
-
-        setState(prevState =>
-          prevState.status === "scanning"
-            ? {
-                ...prevState,
-                results: newNonFollowersBatch.length > 0 ? [...prevState.results, ...newNonFollowersBatch] : prevState.results,
-                totalScanned: activeSession.checkedCount,
-                percentage: followingProgress,
-              }
-            : prevState,
-        );
-
-        setToast({
-          show: true,
-          text: t(lang, "scanningFollowingProgress", activeSession.checkedCount),
-        });
-
-        return true;
-      };
-
-      const followingResult = await fetchList(
-        "following",
-        FOLLOWING_PAGE_SAFETY_LIMIT,
-        checkFollowingPage,
-        { startMaxId, stopAtBatchEnd: true },
-      );
-
-      if (followingResult.status === "batch_end") {
-        // Batch ready: stop and let the user review / unfollow it. Every
-        // result so far is a confirmed non-follower, since the follower index
-        // is complete.
-        activeSession.followingMaxId = followingResult.nextMaxId;
-        activeSession.batchesCompleted++;
+      const stopBlock = (interrupted: boolean) => {
         setState(prevState =>
           prevState.status === "scanning"
             ? {
                 ...prevState,
                 isScanningActive: false,
                 batchReady: true,
-                batchesCompleted: activeSession.batchesCompleted,
-                totalScanned: activeSession.checkedCount,
+                blockInterrupted: interrupted,
+                blockNumber: session.blockNumber,
+                blockChecked: session.blockChecked,
+                blockTotal: session.blockTotal,
+                batchesCompleted: session.batchesCompleted,
+                totalScanned: session.checkedCount,
+                percentage: blockProgress(session),
+              }
+            : prevState,
+        );
+      };
+
+      // Step 1: load a new block, unless the current one was cut short and
+      // still has accounts to check.
+      if (session.pending.length === 0) {
+        if (!(await loadNextBlock(session))) {
+          if (session.checkedCount === 0) {
+            setState(prevState =>
+              prevState.status === "scanning" ? { ...prevState, isScanningActive: false } : prevState,
+            );
+            setToast({ show: true, text: t(lang, "scanFailedFollowing") });
+          } else {
+            stopBlock(false);
+            setToast({ show: true, text: t(lang, "blockLoadFailed") });
+          }
+          return;
+        }
+        setState(prevState =>
+          prevState.status === "scanning"
+            ? {
+                ...prevState,
+                blockNumber: session.blockNumber,
+                blockChecked: 0,
+                blockTotal: session.blockTotal,
+                percentage: 0,
+              }
+            : prevState,
+        );
+        if (session.pending.length > 0) {
+          await paceRequest();
+        }
+      }
+
+      // Step 2: check every account of the block. Each answer is final on its
+      // own, so a block cut short by Instagram still yields correct results.
+      while (session.pending.length > 0) {
+        const user = session.pending[0];
+        const userId = String(user.pk_id ?? user.pk);
+        const result = await withRetry(`friendship check for ${user.username}`, () => fetchFriendshipStatus(userId));
+
+        if (!result.ok && result.blocked) {
+          stopBlock(true);
+          setToast({
+            show: true,
+            text: t(lang, "blockInterruptedToast", session.blockNumber, session.blockChecked, session.blockTotal),
+          });
+          return;
+        }
+
+        session.pending.shift();
+        session.blockChecked++;
+        session.checkedCount++;
+
+        // Non-retryable errors (deleted / unavailable account) are skipped.
+        // An account the viewer no longer follows is not listed either.
+        const newNonFollower =
+          result.ok && result.value.followed_by === false && result.value.following !== false
+            ? rawFriendshipUserToUserNode(user, false)
+            : null;
+        if (newNonFollower !== null) {
+          session.nonFollowers.push(newNonFollower);
+        }
+
+        setState(prevState =>
+          prevState.status === "scanning"
+            ? {
+                ...prevState,
+                results: newNonFollower !== null ? [...prevState.results, newNonFollower] : prevState.results,
+                totalScanned: session.checkedCount,
+                blockChecked: session.blockChecked,
+                percentage: blockProgress(session),
               }
             : prevState,
         );
         setToast({
           show: true,
-          text: t(lang, "batchReadyToast", activeSession.batchesCompleted, activeSession.checkedCount, activeSession.nonFollowers.length),
+          text: t(lang, "checkingBlockProgress", session.blockNumber, session.blockChecked, session.blockTotal),
         });
-        return;
-      }
 
-      const nonFollowers = activeSession.nonFollowers;
-      const checkedCount = activeSession.checkedCount;
-
-      if (followingResult.status === "failed" && checkedCount === 0) {
-        setState(prevState =>
-          prevState.status === "scanning" ? { ...prevState, isScanningActive: false } : prevState,
-        );
-        setToast({
-          show: true,
-          text: t(lang, "scanFailedFollowing"),
-        });
-        return;
-      }
-
-      const scanIsComplete = followingResult.status === "complete";
-      activeSession.finished = scanIsComplete;
-
-      if (scanIsComplete || nonFollowers.length > 0) {
-        saveCachedScanResults(nonFollowers);
-        setCachedScan({ results: nonFollowers, timestamp: Date.now() });
-      }
-
-      setState(prevState => {
-        if (prevState.status !== "scanning") {
-          return prevState;
+        if (session.pending.length > 0) {
+          await paceRequest();
         }
-        return {
-          ...prevState,
-          percentage: 100,
-          scanIncomplete: !scanIsComplete,
-          isScanningActive: false,
-          batchReady: false,
-          results: [...nonFollowers],
-          totalScanned: checkedCount,
-        };
-      });
+      }
 
+      // Step 3: the block is done.
+      session.batchesCompleted++;
+      if (session.listExhausted) {
+        session.finished = true;
+        saveCachedScanResults(session.nonFollowers);
+        setCachedScan({ results: session.nonFollowers, timestamp: Date.now() });
+        setState(prevState =>
+          prevState.status === "scanning"
+            ? {
+                ...prevState,
+                percentage: 100,
+                isScanningActive: false,
+                batchReady: false,
+                blockInterrupted: false,
+                scanIncomplete: false,
+                results: [...session.nonFollowers],
+                totalScanned: session.checkedCount,
+              }
+            : prevState,
+        );
+        setToast({ show: true, text: t(lang, "scanCompleted") });
+        return;
+      }
+
+      stopBlock(false);
       setToast({
         show: true,
-        text: scanIsComplete
-          ? t(lang, "scanCompleted")
-          : t(lang, "partialScanInterrupted", checkedCount),
+        text: t(lang, "batchReadyToast", session.blockNumber, session.blockTotal, session.nonFollowers.length),
       });
     };
     scan();

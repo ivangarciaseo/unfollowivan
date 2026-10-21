@@ -156,7 +156,7 @@ export const SettingMenu = ({
                   type="number"
                   id="timeBetweenProfileBatches"
                   name="timeBetweenProfileBatches"
-                  min={10000}
+                  min={0}
                   max={999999}
                   value={timeBetweenProfileBatches}
                   onChange={(e) => handleInputChange(e, setTimeBetweenProfileBatches)}

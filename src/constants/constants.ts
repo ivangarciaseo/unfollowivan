@@ -31,11 +31,13 @@ export const DEFAULT_TIME_TO_WAIT_AFTER_FIVE_SEARCH_CYCLES = 10000;
 export const DEFAULT_TIME_BETWEEN_UNFOLLOWS = 4000;
 export const DEFAULT_TIME_TO_WAIT_AFTER_FIVE_UNFOLLOWS = 300000;
 export const DEFAULT_USERS_PER_SEARCH_CYCLE = 50;
-// Profiles are retrieved in batches: after every DEFAULT_PROFILES_PER_BATCH
-// profiles (followers + following, counted together) the scan takes a long
-// pause so Instagram doesn't rate-limit the session.
+// The following list is scanned in blocks of DEFAULT_PROFILES_PER_BATCH
+// accounts; the scan stops after each block so it can be unfollowed. Every
+// account is checked with its own request, and after CHECKS_BEFORE_REST
+// requests the scan rests for DEFAULT_TIME_BETWEEN_PROFILE_BATCHES ms.
 export const DEFAULT_PROFILES_PER_BATCH = 1000;
-export const DEFAULT_TIME_BETWEEN_PROFILE_BATCHES = 60000;
+export const DEFAULT_TIME_BETWEEN_PROFILE_BATCHES = 30000;
+export const CHECKS_BEFORE_REST = 100;
 
 // FILTER CONSTANTS
 export const WITHOUT_PROFILE_PICTURE_URL_IDS = [
