@@ -14,7 +14,7 @@ import {
   DEFAULT_USERS_PER_SEARCH_CYCLE,
   CHECKS_BEFORE_REST,
   FOLLOWING_PAGE_SAFETY_LIMIT,
-  DEFAULT_PROFILES_PER_BATCH,
+  DEFAULT_FOLLOWING_PER_BLOCK,
   DEFAULT_TIME_BETWEEN_PROFILE_BATCHES,
   INSTAGRAM_HOSTNAME,
   RATE_LIMIT_COOLDOWN_SECONDS,
@@ -41,7 +41,7 @@ import { Timings } from "./model/timings";
 import { loadCachedScanResults, loadTimings, loadWhitelist, saveCachedScanResults, saveTimings, saveWhitelist } from "./utils/whitelist-manager";
 import { getInitialLanguage, Language, saveLanguage, t } from "./utils/i18n";
 
-// A scan walks the viewer's following list in blocks (1000 accounts by
+// A scan walks the viewer's following list in blocks (300 accounts by
 // default). Each block is loaded, then every account in it is checked one by
 // one, and the scan stops so its non-followers can be unfollowed before the
 // next block. All of this survives between runs of the scan effect.
@@ -168,7 +168,7 @@ function App() {
       timeBetweenUnfollows: storedTimings?.timeBetweenUnfollows ?? DEFAULT_TIME_BETWEEN_UNFOLLOWS,
       timeToWaitAfterFiveUnfollows: storedTimings?.timeToWaitAfterFiveUnfollows ?? DEFAULT_TIME_TO_WAIT_AFTER_FIVE_UNFOLLOWS,
       usersPerSearchCycle: storedTimings?.usersPerSearchCycle ?? DEFAULT_USERS_PER_SEARCH_CYCLE,
-      profilesPerBatch: storedTimings?.profilesPerBatch ?? DEFAULT_PROFILES_PER_BATCH,
+      followingPerBlock: storedTimings?.followingPerBlock ?? DEFAULT_FOLLOWING_PER_BLOCK,
       timeBetweenProfileBatches: storedTimings?.timeBetweenProfileBatches ?? DEFAULT_TIME_BETWEEN_PROFILE_BATCHES,
     };
   });
@@ -546,7 +546,7 @@ function App() {
       }
     };
 
-    const blockSize = Math.max(1, timings.profilesPerBatch ?? DEFAULT_PROFILES_PER_BATCH);
+    const blockSize = Math.max(1, timings.followingPerBlock ?? DEFAULT_FOLLOWING_PER_BLOCK);
     const usersPerRequest = Math.max(1, timings.usersPerSearchCycle ?? DEFAULT_USERS_PER_SEARCH_CYCLE);
     const restDuration = Math.max(0, timings.timeBetweenProfileBatches ?? DEFAULT_TIME_BETWEEN_PROFILE_BATCHES);
     let requestsSinceRest = 0;

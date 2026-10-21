@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Timings } from "../model/timings";
 import { UserNode } from "../model/user";
 import { WhitelistManager } from "./WhitelistManager";
-import { DEFAULT_PROFILES_PER_BATCH, DEFAULT_TIME_BETWEEN_PROFILE_BATCHES, DEFAULT_USERS_PER_SEARCH_CYCLE } from "../constants/constants";
+import { DEFAULT_FOLLOWING_PER_BLOCK, DEFAULT_TIME_BETWEEN_PROFILE_BATCHES, DEFAULT_USERS_PER_SEARCH_CYCLE } from "../constants/constants";
 import { Language, t } from "../utils/i18n";
 
 interface SettingMenuProps {
@@ -29,7 +29,7 @@ export const SettingMenu = ({
   const [timeBetweenUnfollows, setTimeBetweenUnfollows] = useState(currentTimings.timeBetweenUnfollows);
   const [timeToWaitAfterFiveUnfollows, setTimeToWaitAfterFiveUnfollows] = useState(currentTimings.timeToWaitAfterFiveUnfollows);
   const [usersPerSearchCycle, setUsersPerSearchCycle] = useState(currentTimings.usersPerSearchCycle ?? DEFAULT_USERS_PER_SEARCH_CYCLE);
-  const [profilesPerBatch, setProfilesPerBatch] = useState(currentTimings.profilesPerBatch ?? DEFAULT_PROFILES_PER_BATCH);
+  const [followingPerBlock, setFollowingPerBlock] = useState(currentTimings.followingPerBlock ?? DEFAULT_FOLLOWING_PER_BLOCK);
   const [timeBetweenProfileBatches, setTimeBetweenProfileBatches] = useState(currentTimings.timeBetweenProfileBatches ?? DEFAULT_TIME_BETWEEN_PROFILE_BATCHES);
 
   const handleSave = (event: any) => {
@@ -40,7 +40,7 @@ export const SettingMenu = ({
       timeBetweenUnfollows,
       timeToWaitAfterFiveUnfollows,
       usersPerSearchCycle,
-      profilesPerBatch,
+      followingPerBlock,
       timeBetweenProfileBatches,
     });
     setSettingState(false);
@@ -137,15 +137,15 @@ export const SettingMenu = ({
               </div>
 
               <div className="row">
-                <label className="minimun-width">{t(lang, "profilesPerBatch")}</label>
+                <label className="minimun-width">{t(lang, "followingPerBlock")}</label>
                 <input
                   type="number"
-                  id="profilesPerBatch"
-                  name="profilesPerBatch"
-                  min={50}
+                  id="followingPerBlock"
+                  name="followingPerBlock"
+                  min={10}
                   max={5000}
-                  value={profilesPerBatch}
-                  onChange={(e) => handleInputChange(e, setProfilesPerBatch)}
+                  value={followingPerBlock}
+                  onChange={(e) => handleInputChange(e, setFollowingPerBlock)}
                 />
                 <label className="margin-between-input-and-label">(users)</label>
               </div>

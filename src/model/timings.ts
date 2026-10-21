@@ -4,6 +4,6 @@ export interface Timings {
   timeBetweenUnfollows: number;
   timeToWaitAfterFiveUnfollows: number;
   usersPerSearchCycle?: number;
-  profilesPerBatch?: number;
+  followingPerBlock?: number;
   timeBetweenProfileBatches?: number;
 }
