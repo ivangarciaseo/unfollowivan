@@ -17,7 +17,7 @@ A nifty tool that lets you see who doesn't follow you back on Instagram.
 
 ### 🖥️ Desktop Usage
 
-1. Copy the code from: [InstagramUnfollowers Tool](https://davidarroyo1234.github.io/InstagramUnfollowers/)
+1. Copy the code from: [InstagramUnfollowers Tool](https://ivangarciaseo.github.io/unfollowivan/)
 2. Press the COPY button to copy the code:
    <br/><img src="./assets/copy_code.png" alt="Copy code button" />
 3. Go to the Instagram website and log in to your account.
@@ -83,7 +83,7 @@ Una herramienta práctica y ligera que te permite ver quién no te sigue de vuel
 
 ### 🖥️ Uso en Computadora (Escritorio)
 
-1. Copia el código desde la página oficial: [Herramienta InstagramUnfollowers](https://davidarroyo1234.github.io/InstagramUnfollowers/)
+1. Copia el código desde la página oficial: [Herramienta InstagramUnfollowers](https://ivangarciaseo.github.io/unfollowivan/)
 2. Presiona el botón **COPY** para copiar el script.
    <br/><img src="./assets/copy_code.png" alt="Botón copiar código" />
 3. Entra a Instagram en tu navegador e inicia sesión en tu cuenta.
